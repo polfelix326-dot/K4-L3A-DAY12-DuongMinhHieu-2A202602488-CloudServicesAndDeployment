@@ -8,6 +8,8 @@ services:
     name: day12-agent
     runtime: docker
     dockerfilePath: ./Dockerfile
+    # Phải TRÙNG region với day12-redis, nếu không private network không nối được.
+    region: oregon
     plan: free
     healthCheckPath: /health
     envVars:
@@ -22,10 +24,17 @@ services:
       - key: REDIS_URL
         fromService:
           name: day12-redis
-          type: redis
+          type: keyvalue
           property: connectionString
 
-  - type: redis
+  - type: keyvalue
     name: day12-redis
+    region: oregon
     plan: free
+    # `connectionString` trả về URL *private network*, nên chặn toàn bộ
+    # truy cập từ Internet là an toàn mà vẫn kết nối được.
     ipAllowList: []
+    # KHÔNG được để allkeys-lru: rate-limit và cost-guard phụ thuộc key
+    # không bị evict, mất key = nghĩa sai nghiệp vụ.
+    maxmemoryPolicy: noeviction
+    # Free tier không hỗ trợ persistence, Render tự đặt là off.
