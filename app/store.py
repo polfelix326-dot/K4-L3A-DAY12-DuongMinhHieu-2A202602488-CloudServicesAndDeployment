@@ -47,33 +47,35 @@ class ConversationStore:
     def ping(self) -> bool:
         """Redis có trả lời không? Dùng cho endpoint /ready.
 
-        TODO (CP4): gọi ``self.client.ping()`` trong try/except.
-        Trả ``True`` nếu thành công, ``False`` nếu có bất kỳ Exception nào
-        (mất mạng, sai mật khẩu, Redis chưa khởi động...).
+        Bắt mọi ``Exception`` chứ không chỉ ``ConnectionError``: Redis chưa
+        khởi động, sai mật khẩu, timeout, DNS hỏng đều phải ra cùng một câu
+        trả lời là "không sẵn sàng". Để exception thoát ra sẽ biến /ready
+        thành 500 — mà load balancer coi 500 là lỗi của nó chứ không phải của
+        bạn, nên nó vẫn cứ đẩy traffic vào.
         """
-        raise NotImplementedError("TODO (CP4): cài đặt ping")
+        try:
+            return bool(self.client.ping())
+        except Exception:
+            return False
 
     def append(self, user_id: str, role: str, content: str) -> None:
         """Ghi thêm một lượt vào lịch sử.
 
-        TODO (CP4):
-          1. ``self.client.rpush(key, json.dumps({"role": role, "content": content},
-             ensure_ascii=False))``
-          2. ``self.client.ltrim(key, -HISTORY_MAX_MESSAGES, -1)`` — chỉ giữ
-             ``HISTORY_MAX_MESSAGES`` message gần nhất, nếu không prompt sẽ
-             phình vô hạn và tiền token cũng vậy.
-          3. ``self.client.expire(key, HISTORY_TTL_SECONDS)`` — hội thoại cũ
-             tự hết hạn, khỏi phải dọn tay.
+        Dùng List vì cần đọc lại theo thứ tự thời gian, và vì ``LTRIM`` cắt
+        được theo index — giữ đúng ``HISTORY_MAX_MESSAGES`` tin mới nhất.
         """
-        raise NotImplementedError("TODO (CP4): cài đặt append")
+        key = self._key(user_id)
+        self.client.rpush(
+            key, json.dumps({"role": role, "content": content}, ensure_ascii=False)
+        )
+        self.client.ltrim(key, -HISTORY_MAX_MESSAGES, -1)
+        self.client.expire(key, HISTORY_TTL_SECONDS)
 
     def get_history(self, user_id: str) -> list[dict]:
-        """Đọc lịch sử hội thoại, cũ nhất trước.
-
-        TODO (CP4): ``self.client.lrange(key, 0, -1)`` rồi ``json.loads``
-        từng phần tử. Chưa có gì → trả về list rỗng.
-        """
-        raise NotImplementedError("TODO (CP4): cài đặt get_history")
+        """Đọc lịch sử hội thoại, cũ nhất trước."""
+        return [
+            json.loads(item) for item in self.client.lrange(self._key(user_id), 0, -1)
+        ]
 
     def clear(self, user_id: str) -> None:
         """CHO SẴN — xóa lịch sử của một user."""
